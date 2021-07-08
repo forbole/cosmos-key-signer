@@ -18,7 +18,7 @@ prost-types = { version = "0.7" }
 reqwest = { version = "0.11.0", features = ["blocking", "json"]}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0.62" }
-tonic = { version = "0.4.1"}
+tonic = { version = "0.5.0"}
 crw-wallet = { path = "../../packages/crw-wallet", version = "0.1.0" }
 thiserror = "1.0.24"
 
