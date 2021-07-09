@@ -1,5 +1,6 @@
 [workspace]
 members = ["packages/*"]
+resolver = "2"
 
 [profile.release.package.crw-wallet]
 codegen-units = 1
@@ -18,4 +19,4 @@ debug = false
 debug-assertions = false
 
 [patch.crates-io]
-cosmos-sdk-proto = { git = "https://github.com/forbole/cosmos-rust", branch = "main"}
+cosmos-sdk-proto = { git = "https://github.com/shravanshetty1/cosmos-rust", branch = "wasm2"}

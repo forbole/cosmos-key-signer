@@ -10,14 +10,12 @@ use cosmos_sdk_proto::cosmos::{
     tx::v1beta1::{service_client::ServiceClient, BroadcastMode, BroadcastTxRequest, Tx, TxRaw},
 };
 use reqwest::{get, StatusCode};
-use tonic::codegen::http::uri::InvalidUri;
-use tonic::transport::Endpoint;
-use tonic::{codegen::http::Uri, transport::Channel, Request};
+use tonic::Request;
 
 /// Client to communicate with a full node.
 #[derive(Clone)]
 pub struct CosmosClient {
-    grpc_channel: Endpoint,
+    grpc_addr: String,
     lcd_addr: String,
 }
 
@@ -26,24 +24,37 @@ impl CosmosClient {
     /// The client will communicate using `lcd_address` for the legacy LCD requests
     /// and `grpc_addr` for the new gRPC request.
     ///
-    /// # Errors
-    /// Returns an [`Err`] if `grpc_addr` is an invalid URI.
-    ///
     ///# Examples
     ///
     /// ```
     ///  use crw_client::client::CosmosClient;
     ///
-    ///  let client = CosmosClient::new("http://localhost:1317", "http://localhost:9090").unwrap();
+    ///  let client = CosmosClient::new("http://localhost:1317", "http://localhost:9090");
     /// ```
-    pub fn new(lcd_addr: &str, grpc_addr: &str) -> Result<CosmosClient, InvalidUri> {
-        let grpc_uri = grpc_addr.parse::<Uri>()?;
-        let grpc_channel = Channel::builder(grpc_uri);
-
-        Ok(CosmosClient {
-            grpc_channel,
+    pub fn new(lcd_addr: &str, grpc_addr: &str) -> CosmosClient {
+        CosmosClient {
+            grpc_addr: grpc_addr.to_string(),
             lcd_addr: lcd_addr.to_string(),
-        })
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn grpc_client(&self) -> Result<tonic::transport::Channel, CosmosError> {
+        let grpc_uri = self
+            .grpc_addr
+            .parse::<tonic::codegen::http::Uri>()
+            .map_err(|err| CosmosError::Grpc(err.to_string()))?;
+        let grpc_channel = tonic::transport::Channel::builder(grpc_uri);
+
+        Ok(grpc_channel
+            .connect()
+            .await
+            .map_err(|err| CosmosError::Grpc(err.to_string()))?)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn grpc_client(&self) -> Result<grpc_web_client::Client, CosmosError> {
+        Ok(grpc_web_client::Client::new(self.grpc_addr.clone()))
     }
 
     /// Gets the information of a full node.
@@ -67,15 +78,7 @@ impl CosmosClient {
 
     /// Returns the account data associated to the given address.
     pub async fn get_account_data(&self, address: &str) -> Result<BaseAccount, CosmosError> {
-        // Create channel connection to the gRPC server
-        let channel = self
-            .grpc_channel
-            .connect()
-            .await
-            .map_err(|err| CosmosError::Grpc(err.to_string()))?;
-
-        // Create gRPC query auth client from channel
-        let mut client = QueryClient::new(channel);
+        let mut client = QueryClient::new(self.grpc_client().await?);
 
         // Build a new request
         let request = Request::new(QueryAccountRequest {
@@ -123,13 +126,7 @@ impl CosmosClient {
         };
         prost::Message::encode(&tx_raw, &mut serialized_tx)?;
 
-        // Open the channel and perform the actual gRPC BroadcastTxRequest
-        let channel = self
-            .grpc_channel
-            .connect()
-            .await
-            .map_err(|err| CosmosError::Grpc(err.to_string()))?;
-        let mut service = ServiceClient::new(channel);
+        let mut service = ServiceClient::new(self.grpc_client().await?);
 
         let request = Request::new(BroadcastTxRequest {
             tx_bytes: serialized_tx,
@@ -156,7 +153,7 @@ mod tests {
     static TEST_MNEMONIC: &str = "elephant luggage finger obscure nest smooth flag clay recycle unfair capital category organ bicycle gallery sight canyon hotel dutch skull today pink scale aisle";
     static DESMOS_DERIVATION_PATH: &str = "m/44'/852'/0'/0/0";
 
-    #[actix_rt::test]
+    #[test]
     async fn node_info() {
         let cosmos_client =
             CosmosClient::new("http://localhost:1317", "http://localhost:9090").unwrap();
@@ -167,7 +164,7 @@ mod tests {
         assert_eq!("testchain", info.unwrap().network);
     }
 
-    #[actix_rt::test]
+    #[test]
     async fn broadcast_tx() {
         let wallet = MnemonicWallet::new(TEST_MNEMONIC, DESMOS_DERIVATION_PATH).unwrap();
 
